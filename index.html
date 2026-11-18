@@ -1048,9 +1048,10 @@ A.watchSheet = () => {
     ${step(2,"Adicione a ação <b>Obter Conteúdo do URL</b> e cole o endereço copiado.")}
     ${step(3,"Adicione <b>Obter Valor do Dicionário</b>: chave <b>msg</b>. Depois adicione <b>Mostrar Notificação</b> com esse valor.")}
     ${step(4,"Adicione outro <b>Obter Valor do Dicionário</b>: chave <b>descanso</b>, usando o <i>Conteúdo do URL</i> como dicionário.")}
-    ${step(5,"Adicione <b>Iniciar Temporizador</b> com o valor de <i>descanso</i>, em <b>segundos</b>.")}
+    ${step(5,"Adicione <b>Iniciar Timer</b>. Toque no número (ex.: 90), apague, e escolha a variável <b>Valor do Dicionário</b> que vem logo acima (a de <i>descanso</i>). Unidade: <b>segundos</b>. <span style='color:var(--accent)'>Não deixe um número fixo</span>, senão o descanso será sempre o mesmo.")}
     ${step(6,"Nos detalhes do atalho (ícone ⓘ), ative <b>Mostrar no Apple Watch</b>.")}
     ${step(7,"No relógio, edite o mostrador e coloque a complicação <b>Atalhos → Série feita</b>. Pronto: um toque registra a série e começa o descanso.")}
+    <div class="small muted" style="margin:6px 0 12px;line-height:1.5">Dica: toque em “Série feita” depois que o cronômetro do relógio terminar. Se ainda houver um cronômetro rodando, o relógio pode mostrar “Não foi possível executar Iniciar Timer”, mas a série é registrada mesmo assim. As séries marcadas pelo relógio aparecem no celular quando você abrir o Carga.</div>
     <div class="card" style="background:var(--card2)"><div class="small muted">Opcional: um segundo atalho “Desfazer série”, só com <b>Obter Conteúdo do URL</b> + <b>Mostrar Notificação</b>, usando este endereço:</div>
       <button class="btn soft sm" style="margin-top:8px" data-a="copyUrl" data-v="${esc(u)}">Copiar endereço de desfazer</button></div>
     <button class="btn soft" data-a="watchTest">Testar conexão</button>

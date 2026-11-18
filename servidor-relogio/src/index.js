@@ -64,9 +64,11 @@ export class Session extends DurableObject {
     const after = nextSet(plan, marks);
     const rest = next.lastOfBlock ? (next.it.rest || 90) : 15;
     const upNext = after ? `Próxima: ${after.it.name} (${after.j + 1}/${after.it.sets.length})` : "Era a última série!";
+    // 1ª linha curta: é o que aparece inteiro no banner do relógio
+    const head = !after ? "✓ Última série!" : next.lastOfBlock ? `✓ Descanso ${fmt(rest)}` : "✓ Troque de aparelho";
     return json({
       descanso: after ? rest : 0,
-      msg: `✓ ${next.it.name} ${next.j + 1}/${next.it.sets.length} · ${s.reps ?? "-"} × ${s.kg ?? 0} kg\n${after ? (next.lastOfBlock ? `Descanso ${fmt(rest)}` : "Troca de aparelho") + "\n" : ""}${upNext}`,
+      msg: `${head}\n${next.it.name} ${next.j + 1}/${next.it.sets.length} · ${s.reps ?? "-"}×${s.kg ?? 0}kg\n${upNext}`,
     });
   }
 }
