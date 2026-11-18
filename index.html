@@ -299,7 +299,67 @@ const cloud = { db:null, uid:null, status:"local", timer:null, busy:false, again
 function save(){
   try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){}
   if(cloud.uid){ clearTimeout(cloud.timer); cloud.timer=setTimeout(pushCore, 1200); }
+  watchSchedule();
 }
+
+/* ===== Apple Watch: ponte via servidor Carga Relógio + Atalhos no relógio ===== */
+const WATCH_API = "https://carga-relogio.baxada1-marcelo.workers.dev";
+const watch = { timer:null, poll:null, sending:false, again:false, lastSent:"", ended:false };
+const watchOn = () => !!(S.settings.watch && S.settings.watch.on && S.settings.watch.token);
+function newToken(){ const a=new Uint8Array(18); crypto.getRandomValues(a); return Array.from(a,b=>"abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"[b%56]).join(""); }
+function watchPlan(){
+  const a=S.active; if(!a) return {active:false};
+  return {id:a.id, name:a.name, items:a.items.map(it=>{ const prev=lastSets(it.exId)||[];
+    return {id:it.id, name:exById(it.exId).name, ss:it.ss||null, rest:it.rest||S.settings.rest,
+      sets:it.sets.map((s,j)=>{ const p=prev[j]||prev[prev.length-1]||{};
+        return {reps: num(s.reps) ?? num(p.reps) ?? null, kg: num(s.kg) ?? num(p.kg) ?? 0, done:!!s.done}; })}; })};
+}
+function watchSchedule(){ if(!watchOn()) return; clearTimeout(watch.timer); watch.timer=setTimeout(watchPush, 700); }
+async function watchPush(){
+  if(!watchOn()) return;
+  if(watch.sending){ watch.again=true; return; }
+  const body=JSON.stringify(watchPlan());
+  if(body===watch.lastSent) return;
+  if(!S.active && watch.ended) return;
+  watch.sending=true;
+  try{
+    const r=await fetch(`${WATCH_API}/p/${S.settings.watch.token}`,{method:"PUT",headers:{"Content-Type":"application/json"},body});
+    const j=await r.json(); watch.lastSent=body; watch.ended=!S.active;
+    if(j.marks && j.marks.length) applyMarks(j.marks);
+  }catch(e){}
+  watch.sending=false;
+  if(watch.again){ watch.again=false; watchPush(); }
+}
+async function watchPull(){
+  if(!watchOn() || !S.active || document.visibilityState!=="visible") return;
+  try{ const r=await fetch(`${WATCH_API}/p/${S.settings.watch.token}`,{cache:"no-store"}); const j=await r.json();
+    if(!j.plan || j.plan.id!==S.active.id){ watch.lastSent=""; watchPush(); return; }
+    if(j.marks && j.marks.length) applyMarks(j.marks);
+  }catch(e){}
+}
+/* séries marcadas no relógio entram no treino do celular */
+function applyMarks(marks){
+  const a=S.active; if(!a) return;
+  let changed=false, lastIt=null;
+  for(const m of [...marks].filter(m=>m.wid===a.id).sort((x,y)=>x.at-y.at)){
+    const it=a.items.find(x=>x.id===m.item), s=it&&it.sets[m.j]; if(!s||s.done) continue;
+    const p=(lastSets(it.exId)||[])[m.j] || (lastSets(it.exId)||[]).slice(-1)[0] || {};
+    if(s.reps===""||s.reps==null) s.reps=num(p.reps)??0; if(s.kg===""||s.kg==null) s.kg=num(p.kg)??0;
+    s.reps=num(s.reps); s.kg=num(s.kg);
+    s.done=true; s.doneAt=m.at; s.restTaken=a.lastDoneAt && m.at>a.lastDoneAt ? Math.round((m.at-a.lastDoneAt)/1000) : null;
+    if(!a.lastDoneAt || m.at>a.lastDoneAt){ a.lastDoneAt=m.at; lastIt=it; }
+    changed=true;
+  }
+  if(!changed) return;
+  if(lastIt){ let restNow=true;
+    if(lastIt.ss){ const g=a.items.filter(o=>o.ss===lastIt.ss); restNow = g[g.length-1]===lastIt; }
+    const r=lastIt.rest||S.settings.rest, end=a.lastDoneAt+r*1000;
+    if(restNow && end>Date.now()) a.rest={start:a.lastDoneAt, end, total:r, ex:exById(lastIt.exId).name};
+  }
+  save(); render(true); toast("Série registrada pelo relógio ⌚");
+}
+setInterval(watchPull, 4000);
+document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible") watchPull(); });
 const coreRef = () => cloud.db.doc(`data/users/${cloud.uid}/core`);
 const wRef = id => coreRef().collection("w").doc(id);
 function coreBody(){ const {workouts, ...rest} = S; return {json: JSON.stringify(rest), at: Date.now()}; }
@@ -961,10 +1021,43 @@ A.settings = () => { const s=S.settings;
     <label class="field"><span>Descanso padrão para novos exercícios (segundos)</span><input id="stRest" inputmode="numeric" value="${s.rest}"></label>
     <button class="opt" data-a="stToggle" data-k="sound"><span>Som ao fim do descanso</span><span class="cbx ${s.sound?"on":""}">${s.sound?I.check:""}</span></button>
     <button class="opt" data-a="stToggle" data-k="vibrate"><span>Vibrar</span><span class="cbx ${s.vibrate?"on":""}">${s.vibrate?I.check:""}</span></button>
+    <button class="opt" data-a="watchSheet"><span>⌚ Apple Watch ${watchOn()?'<span class="pill" style="margin:0 0 0 6px">ativo</span>':'<span class="small muted">— marcar séries pelo relógio</span>'}</span>${I.back.replace('<svg','<svg style="transform:scaleX(-1)"')}</button>
     <button class="btn primary" style="margin:14px 0" data-a="stSave">Salvar ajustes</button>
     <div class="small muted" style="margin:6px 0" id="syncNote">${syncText()}</div>
     <div class="btns"><button class="btn soft" data-a="exportData">Exportar backup</button><button class="btn soft" data-a="importData">Importar backup</button></div>
     <button class="btn danger" style="margin-top:10px" data-a="wipe">Apagar todos os dados</button>`); };
+A.watchSheet = () => {
+  const w=S.settings.watch||{};
+  if(!watchOn()){
+    openSheet(`<h3>Apple Watch</h3><p class="lead">Marque a série pelo relógio com um toque. O relógio começa a contagem do descanso e vibra quando terminar. As séries aparecem aqui no celular automaticamente.</p>
+      <div class="card" style="background:var(--card2)"><div class="small" style="line-height:1.6">Você vai precisar:<br>• App <b>Atalhos</b> no iPhone (já vem instalado)<br>• Relógio com o iPhone por perto, ou com Wi-Fi/4G<br>• Uns 3 minutos para criar o atalho, uma vez só</div></div>
+      <button class="btn primary" data-a="watchEnable">Ativar Apple Watch</button>`);
+    return;
+  }
+  const s=`${WATCH_API}/s/${w.token}`, u=`${WATCH_API}/u/${w.token}`;
+  const step=(n,t)=>`<div class="row" style="align-items:flex-start;margin:10px 0"><b style="flex:none;width:24px;height:24px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font-size:13px">${n}</b><div class="grow small" style="line-height:1.5">${t}</div></div>`;
+  openSheet(`<h3>Apple Watch</h3><p class="lead">Crie este atalho no app <b style="color:var(--text)">Atalhos</b> do iPhone:</p>
+    <label class="field"><span>Endereço do seu atalho “Série feita” (é secreto, não compartilhe)</span><input id="wUrl" readonly value="${esc(s)}"></label>
+    <button class="btn soft" data-a="copyUrl" data-v="${esc(s)}">Copiar endereço</button>
+    ${step(1,"No app <b>Atalhos</b>, toque em <b>+</b> e dê o nome <b>Série feita</b>.")}
+    ${step(2,"Adicione a ação <b>Obter Conteúdo do URL</b> e cole o endereço copiado.")}
+    ${step(3,"Adicione <b>Obter Valor do Dicionário</b>: chave <b>msg</b>. Depois adicione <b>Mostrar Notificação</b> com esse valor.")}
+    ${step(4,"Adicione outro <b>Obter Valor do Dicionário</b>: chave <b>descanso</b>, usando o <i>Conteúdo do URL</i> como dicionário.")}
+    ${step(5,"Adicione <b>Iniciar Temporizador</b> com o valor de <i>descanso</i>, em <b>segundos</b>.")}
+    ${step(6,"Nos detalhes do atalho (ícone ⓘ), ative <b>Mostrar no Apple Watch</b>.")}
+    ${step(7,"No relógio, edite o mostrador e coloque a complicação <b>Atalhos → Série feita</b>. Pronto: um toque registra a série e começa o descanso.")}
+    <div class="card" style="background:var(--card2)"><div class="small muted">Opcional: um segundo atalho “Desfazer série”, só com <b>Obter Conteúdo do URL</b> + <b>Mostrar Notificação</b>, usando este endereço:</div>
+      <button class="btn soft sm" style="margin-top:8px" data-a="copyUrl" data-v="${esc(u)}">Copiar endereço de desfazer</button></div>
+    <button class="btn soft" data-a="watchTest">Testar conexão</button>
+    <button class="btn danger" style="margin-top:10px" data-a="watchOff">Desativar Apple Watch</button>`);
+};
+A.watchEnable = () => { S.settings.watch={on:true, token:(S.settings.watch&&S.settings.watch.token)||newToken()}; watch.lastSent=""; save(); A.watchSheet(); };
+A.watchOff = () => { const t=S.settings.watch&&S.settings.watch.token; S.settings.watch={on:false, token:t}; save(); closeSheet(); toast("Apple Watch desativado"); };
+A.copyUrl = d => { const done=()=>toast("Endereço copiado");
+  try{ navigator.clipboard.writeText(d.v).then(done,()=>{ const i=$("#wUrl"); i.value=d.v; i.select(); toast("Selecionado: toque e copie"); }); }
+  catch(e){ const i=$("#wUrl"); i.value=d.v; i.select(); } };
+A.watchTest = async () => { try{ const r=await fetch(`${WATCH_API}/p/${S.settings.watch.token}`,{cache:"no-store"}); const j=await r.json();
+  toast(j.plan? `Conectado ✓ — treino “${j.plan.name}” visível no relógio` : "Conectado ✓ — inicie um treino para usar o relógio"); }catch(e){ toast("Sem conexão com o servidor do relógio"); } };
 A.stToggle = d => { S.settings[d.k]=!S.settings[d.k]; save(); const gv=$("#stGoal").value, rv=$("#stRest").value; A.settings(); $("#stGoal").value=gv; $("#stRest").value=rv; };
 A.stSave = () => { S.settings.weeklyGoal=Math.max(10,parseInt($("#stGoal").value)||150); S.settings.rest=Math.max(10,parseInt($("#stRest").value)||90); save(); closeSheet(); render(true); toast("Ajustes salvos"); };
 A.exportData = async () => {
