@@ -154,7 +154,13 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .field{display:block;margin:10px 0}
 .field span{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
 .field input,.field select{width:100%;height:46px;border-radius:12px;background:var(--card2);border:1px solid var(--line);padding:0 12px;outline:none}
-.field input:focus,.field select:focus{border-color:var(--accent)}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--accent)}
+.field textarea{width:100%;min-height:96px;border-radius:12px;background:var(--card2);border:1px solid var(--line);padding:10px 12px;outline:none;font:inherit;color:inherit;resize:vertical;line-height:1.45}
+.vidbox{position:relative;width:100%;aspect-ratio:16/9;border-radius:16px;overflow:hidden;background:#000;margin:10px 0 4px}
+.vidbox.tall{aspect-ratio:9/16;max-height:52vh;width:auto;margin-inline:auto}
+.vidbox iframe,.vidbox video{position:absolute;inset:0;width:100%;height:100%;border:0;object-fit:contain;background:#000}
+.notes{white-space:pre-wrap;line-height:1.5}
+a.btn{color:inherit;text-decoration:none}
 .search{display:flex;align-items:center;gap:8px;height:44px;border-radius:12px;background:var(--card2);padding:0 12px;margin:6px 0 10px}
 .search input{flex:1;background:none;border:0;outline:none;height:100%}
 .search svg{width:18px;height:18px;color:var(--muted)}
@@ -749,8 +755,9 @@ V.exStats = (c) => {
       <text x="${W-P}" y="${H+14}" fill="#8d929c" font-size="10" text-anchor="end">${new Date(pts[pts.length-1].t).toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"})}</text>
       <text x="${W-P}" y="${P+4}" fill="#8d929c" font-size="10" text-anchor="end">${fmtN(mx)} kg</text></svg></div>`;
   }
-  return `${topbar(ex.name,{right: ex.custom?`<button class="ib" data-a="exEdit" data-id="${ex.id}">${I.edit}</button>`:undefined})}
+  return `${topbar(ex.name,{right:`<button class="ib" data-a="exEdit" data-id="${ex.id}" aria-label="Editar exercício">${I.edit}</button>`})}
     <div class="row" style="margin:8px 0 4px">${tile(ex)}<div><div class="nm" style="font-size:18px">${esc(ex.name)}</div><div class="small muted">${ex.muscle} · ${ex.equip}</div></div></div>
+    ${exMedia(ex)}
     ${ses.length?`<div class="card grid4">
       <div><div class="k">Maior carga</div><div class="v">${fmtN(best)} kg</div></div>
       <div><div class="k">1RM estimado</div><div class="v">${fmtN(Math.round(orm*10)/10)} kg</div></div>
@@ -990,6 +997,46 @@ function confetti(){
   document.body.appendChild(c); setTimeout(()=>c.remove(),4500);
 }
 
+/* --- vídeo e observações do exercício --- */
+function ytId(u){ const m=String(u||"").match(/(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/))([A-Za-z0-9_-]{11})/); return m?m[1]:null; }
+function exMedia(ex){
+  const yt=ytId(ex.video), tall=/\/shorts\//.test(ex.video||"");
+  let media="";
+  if(ex.vidLocal) media=`<div class="vidbox" id="exVidBox"><video id="exVid" playsinline muted loop autoplay controls></video></div>`;
+  else if(yt) media=`<div class="vidbox ${tall?"tall":""}"><iframe src="https://www.youtube-nocookie.com/embed/${yt}?playsinline=1&rel=0&modestbranding=1&loop=1&playlist=${yt}" title="Vídeo do exercício" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div>`;
+  else if(ex.video) media=`<a class="btn soft" style="margin-top:10px" href="${esc(ex.video)}" target="_blank" rel="noopener">▶ Abrir vídeo</a>`;
+  if(ex.vidLocal) setTimeout(()=>loadLocalVid(ex.id),0);
+  const q=encodeURIComponent(ex.name+" execução");
+  const btns=`<div class="btns" style="margin-top:8px">
+      <button class="btn soft sm" data-a="vidPick" data-id="${ex.id}">${ex.vidLocal?"Trocar vídeo":"Vídeo do celular"}</button>
+      ${ex.vidLocal||ex.video?`<button class="btn soft sm" data-a="vidRemove" data-id="${ex.id}">Remover vídeo</button>`:`<a class="btn soft sm" href="https://www.youtube.com/results?search_query=${q}" target="_blank" rel="noopener">Buscar no YouTube</a>`}
+    </div>`;
+  const notes=ex.notes?`<div class="card"><b>Observações</b><div class="small notes" style="margin-top:6px">${esc(ex.notes)}</div></div>`:"";
+  return media+btns+notes;
+}
+// vídeos gravados no celular ficam no IndexedDB (grandes demais para o localStorage)
+const VDB={ db:null,
+  open(){ return this.db||(this.db=new Promise((ok,ko)=>{ const r=indexedDB.open("carga-videos",1); r.onupgradeneeded=()=>r.result.createObjectStore("v"); r.onsuccess=()=>ok(r.result); r.onerror=()=>ko(r.error); })); },
+  async run(mode,fn){ const db=await this.open(); return new Promise((ok,ko)=>{ const t=db.transaction("v",mode); const q=fn(t.objectStore("v")); t.oncomplete=()=>ok(q&&q.result); t.onerror=()=>ko(t.error); }); },
+  get(k){ return this.run("readonly",st=>st.get(k)); }, put(k,v){ return this.run("readwrite",st=>st.put(v,k)); }, del(k){ return this.run("readwrite",st=>st.delete(k)); } };
+let vidURL=null;
+async function loadLocalVid(id){
+  const el=$("#exVid"); if(!el) return;
+  try{ const b=await VDB.get(id); if(!b){ $("#exVidBox").outerHTML=`<div class="small muted" style="margin-top:10px">O vídeo não está neste aparelho (ele fica salvo só no celular onde foi escolhido).</div>`; return; }
+    if(vidURL) URL.revokeObjectURL(vidURL); vidURL=URL.createObjectURL(b); el.src=vidURL; el.play().catch(()=>{}); }
+  catch(e){ toast("Não consegui abrir o vídeo"); }
+}
+A.vidPick = d => {
+  const inp=document.createElement("input"); inp.type="file"; inp.accept="video/*";
+  inp.onchange=async()=>{ const f=inp.files&&inp.files[0]; if(!f) return;
+    if(f.size>80*1024*1024){ toast("Vídeo muito grande (máx. 80 MB). Corte um trecho curto."); return; }
+    try{ await VDB.put(d.id,f); const ex=exById(d.id); ex.vidLocal=true; save(); render(true); toast("Vídeo salvo"); }
+    catch(e){ toast("Não deu para salvar o vídeo (sem espaço?)"); } };
+  inp.click();
+};
+A.vidRemove = d => askConfirm("Remover vídeo?","O exercício continua na biblioteca, só o vídeo sai.","Remover",async()=>{
+  const ex=exById(d.id); if(ex.vidLocal){ try{ await VDB.del(d.id); }catch(e){} } ex.vidLocal=false; ex.video=""; save(); render(true); });
+
 /* --- exercícios personalizados --- */
 A.newEx = () => exForm({name:ui.libQ||"", muscle:ui.libM||"Peito", equip:ui.libE||"Máquina"});
 A.exEdit = d => exForm(exById(d.id));
@@ -1000,16 +1047,19 @@ function exForm(e){
     <label class="field"><span>Nome</span><input id="fxName" value="${esc(e.name)}" placeholder="Ex.: Remada na máquina articulada"></label>
     <label class="field"><span>Grupo muscular</span><select id="fxMus">${Object.keys(MUSCLES).map(m=>`<option ${m===e.muscle?"selected":""}>${m}</option>`).join("")}</select></label>
     <label class="field"><span>Equipamento</span><select id="fxEq">${EQUIP.map(m=>`<option ${m===e.equip?"selected":""}>${m}</option>`).join("")}</select></label>
+    <label class="field"><span>Observações (execução, ajuste do aparelho, dicas)</span><textarea id="fxNotes" placeholder="Ex.: banco na posição 4, pegada aberta, descer em 3 s">${esc(e.notes||"")}</textarea></label>
+    <label class="field"><span>Link do vídeo (YouTube ou outro site)</span><input id="fxVid" type="url" inputmode="url" value="${esc(e.video||"")}" placeholder="https://youtube.com/shorts/…"></label>
     <button class="btn primary" style="margin-top:14px" data-a="exSave" data-id="${e.id||""}">Salvar</button>
-    ${e.id?`<button class="btn danger" style="margin-top:10px" data-a="exDel" data-id="${e.id}">Excluir exercício</button>`:""}`);
+    ${e.id&&e.custom?`<button class="btn danger" style="margin-top:10px" data-a="exDel" data-id="${e.id}">Excluir exercício</button>`:""}`);
   setTimeout(()=>$("#fxName").focus(),80);
 }
 A.exSave = d => {
   const name=$("#fxName").value.trim(); if(!name){ toast("Dê um nome ao exercício"); return; }
-  const muscle=$("#fxMus").value, equip=$("#fxEq").value;
+  const muscle=$("#fxMus").value, equip=$("#fxEq").value, notes=$("#fxNotes").value.trim(), video=$("#fxVid").value.trim();
+  if(video && !/^https?:\/\//i.test(video)){ toast("O link do vídeo precisa começar com https://"); return; }
   let id=d.id;
-  if(id){ Object.assign(exById(id),{name,muscle,equip}); }
-  else { id="c"+uid(); S.exercises.push({id,name,muscle,equip,custom:true}); }
+  if(id){ Object.assign(exById(id),{name,muscle,equip,notes,video}); }
+  else { id="c"+uid(); S.exercises.push({id,name,muscle,equip,notes,video,custom:true}); }
   save(); const kp=ui._keepPick; closeSheet(); ui.libQ="";
   if(kp){ ui.pick=kp; if(!d.id) (kp.replace!=null? kp.sel=[id] : kp.sel.push(id)); sheetPicker(); }
   else render(true);
