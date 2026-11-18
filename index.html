@@ -896,10 +896,15 @@ A.toggleSet = d => {
   const now=Date.now();
   s.done=true; s.doneAt=now; s.restTaken = a.lastDoneAt? Math.round((now-a.lastDoneAt)/1000) : null; a.lastDoneAt=now;
   // em super série, só descansa depois do último exercício do bloco
-  let restNow=true;
+  let restNow=true, nextEx=null;
   if(it.ss){ const grp=a.items.map((x,k)=>({x,k})).filter(o=>o.x.ss===it.ss); const lastK=grp[grp.length-1].k;
-    if(+d.i!==lastK) restNow=false; }
+    if(+d.i!==lastK){ restNow=false; nextEx=grp.find(o=>o.k>+d.i); } }
   if(restNow){ const r=it.rest||S.settings.rest; a.rest={start:now, end:now+r*1000, total:r, ex:exById(it.exId).name}; }
+  else { // supersérie: sem descanso, só tempo para trocar de aparelho
+    const nm = nextEx ? exById(nextEx.x.exId).name : "próximo exercício";
+    a.rest={start:now, end:now+15000, total:15, ex:nm, swap:true};
+    toast(`Super série → agora: ${nm}`);
+  }
   if(S.settings.vibrate && navigator.vibrate) navigator.vibrate(25);
   save(); render(true);
 };
@@ -1115,7 +1120,7 @@ function tick(){
   }
   if(slot){
     if(a.rest){ const left=Math.max(0,(a.rest.end-Date.now())/1000), pct=left/a.rest.total*100;
-      slot.innerHTML=`<div class="timerbar"><div class="row"><div class="grow"><div class="xs muted">Descanso · ${esc(a.rest.ex)}</div><div class="t">${fmtClock(left)}</div></div>
+      slot.innerHTML=`<div class="timerbar"><div class="row"><div class="grow"><div class="xs muted">${a.rest.swap?"Troca de aparelho → ":"Descanso · "}${esc(a.rest.ex)}</div><div class="t">${fmtClock(left)}</div></div>
         <button class="btn soft sm" data-a="restAdj" data-v="-15">−15</button><button class="btn soft sm" data-a="restAdj" data-v="15">+15</button><button class="btn primary sm" data-a="restSkip">Pular</button></div>
         <div class="bar"><i style="width:${pct}%"></i></div></div>`;
     } else slot.innerHTML="";
